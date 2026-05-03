@@ -207,7 +207,7 @@ if __name__ == "__main__":
                     'steps': steps,
                     'args': args
                 }
-                objective = average_stats[-5:-1].mean()
+                objective = average_stats[1]
 
                 if objective > best_validation_objective:
                     best_validation_objective = objective

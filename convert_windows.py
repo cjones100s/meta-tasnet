@@ -38,6 +38,11 @@ def convert_audio(input_root, output_root, sample_rate=8000):
                 # Load audio
                 audio, sr = torchaudio.load(filepath)
                 
+                # 2. FORCE MONO (The missing piece!)
+                # This turns [2, T] into [1, T] by averaging L and R
+                if audio.shape[0] > 1:
+                    audio = torch.mean(audio, dim=0, keepdim=True)
+                
                 # Resample if not 8kHz
                 if sr != sample_rate:
                     audio = torchaudio.transforms.Resample(sr, sample_rate)(audio)

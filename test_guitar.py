@@ -26,15 +26,15 @@ if __name__ == "__main__":
 
     # 2. LOAD AND PREP AUDIO (Mono 8kHz)
     print(f"Loading {args.input_wav}...")
-    audio, _ = librosa.load(args.input_wav, sr=8000, mono=True)
+    # Pull the sampling rate directly from the model's own training arguments
+    target_sr = model_args.sampling_rate 
+    audio, _ = librosa.load(args.input_wav, sr=target_sr, mono=True)
     
     # 3. MATCH MULTI-STAGE FORMAT
-    # Your baseline MultiTasNet expects a LIST of stages.
-    # Since we are doing 8kHz local training, we give it a list with 1 item.
-    mix = [torch.from_numpy(audio).float().to(device).unsqueeze(0).unsqueeze(1)]
-    
-    # Standardize/Normalize (Matching the 'mix.std' logic in your baseline)
-    mix = [s / (s.std(dim=-1, keepdim=True) + 1e-8) for s in mix]
+    # Ensure we use the exact same normalization as dataset.py
+    mix_tensor = torch.from_numpy(audio).float().to(device).unsqueeze(0).unsqueeze(1)
+    std = mix_tensor.std() if mix_tensor.std() != 0 else 1.0
+    mix = [mix_tensor / std]
 
     print("Separating guitar...")
     with torch.no_grad():
@@ -44,14 +44,26 @@ if __name__ == "__main__":
 
     # 4. SAVE RESULTS
     # The model still outputs 4 slots. Slot 0 or 1 will be your guitar.
-    output_dir = "inference_results"
+    song_name = os.path.basename(os.path.dirname(args.input_wav))
+    
+    output_dir = os.path.join("inference_results", song_name)
     if not os.path.exists(output_dir):
-        os.mkdir(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
+        
+     # Mapping based on your Slot 1 Hijack
+    slot_labels = {
+        0: "Drums",
+        1: "Guitar",
+        2: "Other",
+        3: "Vocals"
+    }
 
     for i in range(4):
         stem = separation[i].numpy()
-        output_file = os.path.join(output_dir, f"guitar_slot_{i}.wav")
-        sf.write(output_file, stem, 8000)
+        label = slot_labels.get(i, f"slot_{i}")
+        output_file = os.path.join(output_dir, f"{label}.wav")
+        
+        sf.write(output_file, stem, target_sr)
         print(f"Saved: {output_file}")
 
-    print("\nInference Complete! Check the 'inference_results' folder.")
+    print(f"\nInference Complete! Results saved to: {output_dir}")
