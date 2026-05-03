@@ -16,7 +16,7 @@ if __name__ == "__main__":
 
     # 1. LOAD THE MODEL
     # We use the 'MultiTasNet' class as per your baseline script
-    checkpoint_path = r"C:\Users\cjone\Projects\meta-tasnet\checkpoints\B=160,E1=8,E2=5,H=160,L=20,N=440,W=20,bs=32,d=False,dlw=3.0,d=0.0,f=3,ip=False,k=3,l=6,lr=0.001,nm=256,rlw=0.05,rb=False,sr=8000,sp=0.0,slw=2.0,s=3,sn=1,tl=1,wd=0.0005\best_checkpoint"
+    checkpoint_path = r"C:\Users\cjone\Projects\meta-tasnet\checkpoint8\best_checkpoint"
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model_args = checkpoint["args"]
     
