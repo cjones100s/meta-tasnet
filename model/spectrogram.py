@@ -76,10 +76,10 @@ class Spectrogram(nn.Module):
         stft = torch.stft(
             signal,
             n_fft=self.n_fft, hop_length=self.hop, window=self.window, center=True,
-            normalized=False, onesided=True, pad_mode='reflect'
+            normalized=False, onesided=True, pad_mode='reflect', return_complex=True
         )  # shape: (B, N', T', 2)
 
-        mag = (stft ** 2).sum(-1)  # shape: (B, N', T')
+        mag = torch.abs(stft).pow(2)   # shape: (B, N', T')
         if db_conversion:
             mag = torch.log10(mag + 1e-8)  # shape: (B, N', T')
 

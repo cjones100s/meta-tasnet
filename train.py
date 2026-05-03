@@ -27,14 +27,17 @@ def train_step(network, batch, s):
 
 
 def eval_step(network, batch, device):
-    batch = tuple([s.to(device) for s in b] for b in batch)
+    network.eval()
     mix, separated = batch
-
-    outputs = network.inference(mix, n_chunks=4)  # shape: (1, 4, 1, T)
-
-    objectives = [sdr_objective(o, s) for o, s in zip(outputs, separated)]
-    objectives = torch.cat(objectives, 0).cpu().numpy()
-    return objectives
+    mix = [m.to(device) for m in mix]
+    separated = [s.to(device) for s in separated]
+    with torch.no_grad():
+        outputs = network.inference(mix, n_chunks=1)
+        # Squeeze the model output to get Slot 1 specifically
+        # outputs[i] is (1, 4, 1, T). We want (1, T) for Slot 1
+        objectives = [sdr_objective(o[:, 1, :, :].flatten(), s.flatten()) for o, s in zip(outputs, separated)]
+        objectives = [o.view(-1) for o in objectives]
+    return torch.cat(objectives, 0).cpu().numpy()
 
 
 if __name__ == "__main__":
@@ -118,14 +121,19 @@ if __name__ == "__main__":
     decay = SGDRLearningRate(optimizer, args.learning_rate, t_0=args.sgdr_period, mul=0.85)
     logger = Logger()
 
-    # Optionally load from a checkpoint
-    if args.checkpoint is not None:
-        state = torch.load(f"{args.directory}/{args.checkpoint}")
+    checkpoint_path = f"{args.directory}/{args.checkpoint}"
+
+    print(checkpoint_path)
+    
+    if args.checkpoint is not None and os.path.exists(checkpoint_path):
+        print(f"Loading checkpoint: {checkpoint_path}")
+        state = torch.load(checkpoint_path, map_location=device, weights_only=False)
         optimizer.load_state_dict(state['optimizer'])
         network.load_state_dict(state['state_dict'])
         initial_epoch = state['epoch'] + 1
         steps = state['steps']
     else:
+        print("No checkpoint found or specified. Starting training from scratch.")
         initial_epoch, steps = 0, 0
 
     # Optionally distribute the model across more GPUs
@@ -199,7 +207,7 @@ if __name__ == "__main__":
                     'steps': steps,
                     'args': args
                 }
-                objective = average_stats[-5:-1].mean()
+                objective = objective = average_stats
 
                 if objective > best_validation_objective:
                     best_validation_objective = objective

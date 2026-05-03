@@ -1,120 +1,87 @@
 import torch
 import torch.nn.functional as F
 
-
 def sdr_objective(estimation, origin, mask=None):
-    """
-    Scale-invariant signal-to-noise ratio (SI-SNR) loss
+    # 1. Flatten to 1D to stop all shape/channel mismatches
+    estimation = estimation.flatten()
+    origin = origin.flatten()
 
-    Arguments:
-        estimation {torch.tensor} -- separated signal of shape: (B, 4, 1, T)
-        origin {torch.tensor} -- ground-truth separated signal of shape (B, 4, 1, T)
-
-    Keyword Arguments:
-        mask {torch.tensor, None} -- boolean mask: True when $origin is 0.0; shape (B, 4, 1) (default: {None})
-
-    Returns:
-        torch.tensor -- SI-SNR loss of shape: (4)
-    """
-    origin_power = torch.pow(origin, 2).sum(dim=-1, keepdim=True) + 1e-8  # shape: (B, 4, 1, 1)
-    scale = torch.sum(origin*estimation, dim=-1, keepdim=True) / origin_power  # shape: (B, 4, 1, 1)
-
-    est_true = scale * origin  # shape: (B, 4, 1, T)
-    est_res = estimation - est_true  # shape: (B, 4, 1, T)
-
-    true_power = torch.pow(est_true, 2).sum(dim=-1).clamp(min=1e-8)  # shape: (B, 4, 1)
-    res_power = torch.pow(est_res, 2).sum(dim=-1).clamp(min=1e-8)  # shape: (B, 4, 1)
-
-    sdr = 10*(torch.log10(true_power) - torch.log10(res_power))  # shape: (B, 4, 1)
-
+    # 2. Trim to the shortest length to handle padding differences
+    min_len = min(len(estimation), len(origin))
     if mask is not None:
-        sdr = (sdr*mask).sum(dim=(0, -1)) / mask.sum(dim=(0, -1)).clamp(min=1e-8)  # shape: (4)
-    else:
-        sdr = sdr.mean(dim=(0, -1))  # shape: (4)
+        mask = mask.flatten()
+        min_len = min(min_len, len(mask))
+        mask = mask[:min_len]
 
-    return sdr  # shape: (4)
+    estimation = estimation[:min_len]
+    origin = origin[:min_len]
 
+    # 3. Apply mask ONLY if it is provided (for guitar stems)
+    if mask is not None:
+        estimation = estimation * mask
+        origin = origin * mask
 
-def dissimilarity_loss(latents, mask):
-    """
-    Minimize the similarity between the different instrument latent representations
-
-    Arguments:
-        latents {torch.tensor} -- latent matrix from the encoder of shape: (B, 1, T', N)
-        mask {torch.tensor} -- boolean mask: True when the signal is 0.0; shape (B, 4)
-
-    Returns:
-        torch.tensor -- shape: ()
-    """
-    a_i = (0, 0, 0, 1, 1, 2)
-    b_i = (1, 2, 3, 2, 3, 3)
-
-    a = latents[a_i, :, :, :]
-    b = latents[b_i, :, :, :]
-
-    count = (mask[:, a_i] * mask[:, b_i]).sum() + 1e-8
-    sim = F.cosine_similarity(a.abs(), b.abs(), dim=-1)
-    sim = sim.sum(dim=(0, 1)) / count
-    return sim.mean()
-
-
-def similarity_loss(latents, mask):
-    """
-    Maximize the similarity between the same instrument latent representations
-
-    Arguments:
-        latents {torch.tensor} -- latent matrix from the encoder of shape: (B, 1, T', N)
-        mask {torch.tensor} -- boolean mask: True when the signal is 0.0; shape (B, 4)
-
-    Returns:
-        torch.tensor -- shape: ()
-    """
-    a = latents
-    b = torch.roll(latents, 1, dims=1)
-
-    count = (mask * torch.roll(mask, 1, dims=0)).sum().clamp(min=1e-8)
-    sim = F.cosine_similarity(a, b, dim=-1)
-    sim = sim.sum(dim=(0, 1)) / count
-    return sim.mean()
-
+    # 4. SI-SNR Math
+    origin_power = torch.pow(origin, 2).sum()
+    dot_product = (origin * estimation).sum()
+    projection = dot_product * origin / (origin_power + 1e-8)
+    
+    noise = estimation - projection
+    ratio = torch.pow(projection, 2).sum() / (torch.pow(noise, 2).sum() + 1e-8)
+    
+    return 10 * torch.log10(ratio + 1e-8)
 
 def calculate_loss(estimated_separation, true_separation, mask, true_latents, estimated_mix, true_mix, args):
-    """
-    The loss function, the sum of 4 different partial losses
-
-    Arguments:
-        estimated_separation {torch.tensor} -- separated signal of shape: (B, 4, 1, T)
-        true_separation {torch.tensor} -- ground-truth separated signal of shape (B, 4, 1, T)
-        mask {torch.tensor} -- boolean mask: True when $true_separation is 0.0; shape (B, 4, 1)
-        true_latents {torch.tensor} -- latent matrix from the encoder of shape: (B, 1, T', N)
-        estimated_mix {torch.tensor} -- estimated reconstruction of the mix, shape: (B, 1, T)
-        true_mix {torch.tensor} -- ground-truth mixed signal, shape: (B, 1, T)
-        args {dict} -- argparse hyperparameters
-
-    Returns:
-        (torch.tensor, torch.tensor) -- shape: [(), (7)]
+    """ 
+    Simplified loss for single-instrument (Guitar) training 
+    optimized for Slot 1 (Bass-lane) hijack.
     """
     stats = torch.zeros(7).to(mask.device)
 
-    sdr = sdr_objective(estimated_separation, true_separation, mask)
-    stats[:4] = sdr
-    total_loss = -sdr.sum()
+    # 1. ISOLATION SURGERY: Pick ONLY Slot 1 [Batch, 1, Time]
+    # estimated_separation is (B, 4, 1, T) -> guitar_est is (B, 1, T)
+    guitar_est = estimated_separation[:, 1, :, :]
+    
+    # 2. ALIGN GROUND TRUTH: Ensure shapes match
+    # true_separation is often [B, 1, 1, T], we squeeze to get [B, 1, T]
+    guitar_true = true_separation.squeeze(1) if true_separation.dim() == 4 else true_separation
 
-    reconstruction_sdr = sdr_objective(estimated_mix, true_mix).mean() if args.reconstruction_loss_weight > 0 else 0.0
-    stats[4] = reconstruction_sdr
-    total_loss += -args.reconstruction_loss_weight * reconstruction_sdr
+    # --- ONE-TIME TELEMETRY AUDIT ---
+    if not hasattr(calculate_loss, "_verified"):
+        print(f"\n" + "="*50)
+        print(f"[AUDIT] Model Raw Output Shape: {estimated_separation.shape}")
+        print(f"[AUDIT] Sliced Guitar Est:     {guitar_est.shape}")
+        print(f"[AUDIT] Sliced Guitar True:    {guitar_true.shape}")
+        
+        # This is the "Static Noise" check: lengths MUST be identical
+        est_len = len(guitar_est.flatten())
+        true_len = len(guitar_true.flatten())
+        print(f"[AUDIT] Est Flattened Len:     {est_len}")
+        print(f"[AUDIT] True Flattened Len:    {true_len}")
+        
+        if est_len != true_len:
+            print("[WARNING] Length mismatch detected! Check slicing.")
+        else:
+            print("[SUCCESS] Dimensions aligned for SI-SNR calculation.")
+        print("="*50 + "\n")
+        
+        calculate_loss._verified = True
 
-    if args.similarity_loss_weight > 0.0 or args.dissimilarity_loss_weight > 0.0:
-        mask = mask.squeeze(-1)
-        true_latents = true_latents * mask.unsqueeze(-1).unsqueeze(-1)
-        true_latents = true_latents.transpose(0, 1)
+    # 3. SDR MATH: Use the matched 1D arrays
+    # Flattening here is now safe because we aren't mixing different channels
+    sdr = sdr_objective(guitar_est.flatten(), guitar_true.flatten())
+    
+    # 4. TOTAL LOSS: Negate SDR so the optimizer minimizes the error
+    total_loss = -sdr
+    stats[1] = sdr
 
-    dissimilarity = dissimilarity_loss(true_latents, mask) if args.dissimilarity_loss_weight > 0.0 else 0.0
-    stats[5] = dissimilarity
-    total_loss += args.dissimilarity_loss_weight * dissimilarity
-
-    similarity = similarity_loss(true_latents, mask) if args.similarity_loss_weight > 0.0 else 0.0
-    stats[6] = similarity
-    total_loss += -args.similarity_loss_weight * similarity
+    # 5. RECONSTRUCTION LOSS: Mix vs. Sum of Parts
+    # This forces the other 3 lanes to hold the leftover non-guitar energy
+    if args.reconstruction_loss_weight > 0:
+        # Sum all 4 channels to check against original mix
+        summed_est = estimated_separation.sum(dim=1) 
+        reconstruction_sdr = sdr_objective(summed_est.flatten(), true_mix.flatten())
+        stats[4] = reconstruction_sdr
+        total_loss += -args.reconstruction_loss_weight * reconstruction_sdr
 
     return total_loss, stats
