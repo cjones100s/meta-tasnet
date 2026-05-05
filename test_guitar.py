@@ -52,16 +52,16 @@ if __name__ == "__main__":
         
      # Mapping based on your Slot 1 Hijack
     slot_labels = {
-        0: "Drums",
-        1: "Guitar",
-        2: "Other",
-        3: "Vocals"
+        0: "drums",
+        1: "guitar",
+        2: "other",
+        3: "vocals"
     }
 
     for i in range(4):
         stem = separation[i].numpy()
         label = slot_labels.get(i, f"slot_{i}")
-        output_file = os.path.join(output_dir, f"{label}.wav")
+        output_file = os.path.join(output_dir, f"{song_name}_{label}.wav")
         
         sf.write(output_file, stem, target_sr)
         print(f"Saved: {output_file}")
