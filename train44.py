@@ -32,7 +32,7 @@ def eval_step(network, batch, device):
     mix = [m.to(device) for m in mix]
     separated = [s.to(device) for s in separated]
     with torch.no_grad():
-        outputs = network.inference(mix, n_chunks=1)
+        outputs = network.inference(mix, n_chunks=8)
         # Squeeze the model output to get Slot 1 specifically
         # outputs[i] is (1, 4, 1, T). We want (1, T) for Slot 1
         objectives = [sdr_objective(o[:, 1, :, :].flatten(), s.flatten()) for o, s in zip(outputs, separated)]
@@ -68,7 +68,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_mels", default=256, type=int, help="The output dimension of spectrogram mel transform.")
     parser.add_argument("--reconstruction_loss_weight", default=0.05, type=float, help="Weight of the SDR reconstruction of the original signal.")
     parser.add_argument("--residual_bias", dest="residual_bias", action="store_true", default=False, help="Add bias before adding to residual/skip connection.")
-    parser.add_argument("--sampling_rate", default=8000, type=int, help="Base sampling rate.")
+    parser.add_argument("--sampling_rate", default=44100, type=int, help="Base sampling rate.")
     parser.add_argument("--seed", default=42, type=int, help="Random seed for reproducibility.")
     parser.add_argument("--sgdr_period", default=200000, type=int, help="Period of the SGDR decay.")
     parser.add_argument("--shuffle_p", default=0.5, type=float, help="Portion of shuffled tracks in the training data.")
@@ -102,7 +102,7 @@ if __name__ == "__main__":
 
     # Load data
     if args.debug: from dataset_stub import MusicDataset
-    else: from dataset import MusicDataset
+    else: from dataset44 import MusicDataset
 
     train_data = MusicDataset(args.train_data, args.sampling_rate // 1000, args.stages_num, sample_length=args.time_length, shuffle_p=args.shuffle_p, is_train=True, verbose=True)
     eval_data = MusicDataset(args.validation_data, args.sampling_rate // 1000, args.stages_num, sample_length=args.time_length, is_train=False, verbose=True)

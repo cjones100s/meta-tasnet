@@ -31,4 +31,4 @@ def check_pipeline(mix_wav, guitar_wav, npz_file):
     print(f"NPZ Guitar Max: {np.abs(npz_data[1]).max():.4f}")
 
 # Example usage:
-check_pipeline('../../Guitar_Separation/train/Cayetana_MissThing/mixture.wav', '../../Guitar_Separation/train/Cayetana_MissThing/guitar.wav', 'data/train_8/Cayetana_MissThing.npz')
+check_pipeline('../../Guitar_Separation_SingleSongFix/train/028c6f6a-f4f6-4795-84f2-a81222b38e7e/mixture.wav', '../../Guitar_Separation_SingleSongFix/train/028c6f6a-f4f6-4795-84f2-a81222b38e7e/guitar.wav', 'data/train_8_test/028c6f6a-f4f6-4795-84f2-a81222b38e7e.npz')
