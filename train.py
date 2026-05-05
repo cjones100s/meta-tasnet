@@ -29,15 +29,25 @@ def train_step(network, batch, s):
 def eval_step(network, batch, device):
     network.eval()
     mix, separated = batch
+    
+    # mix is a list of tensors, separated is a list of tensors [1, 1, T]
     mix = [m.to(device) for m in mix]
     separated = [s.to(device) for s in separated]
+
     with torch.no_grad():
-        outputs = network.inference(mix, n_chunks=1)
-        # Squeeze the model output to get Slot 1 specifically
-        # outputs[i] is (1, 4, 1, T). We want (1, T) for Slot 1
-        objectives = [sdr_objective(o[:, 1, :, :].flatten(), s.flatten()) for o, s in zip(outputs, separated)]
-        objectives = [o.view(-1) for o in objectives]
-    return torch.cat(objectives, 0).cpu().numpy()
+        # inference returns a list of outputs for each stage
+        # each output is (1, 4, 1, T)
+        outputs = network.inference(mix, n_chunks=1) 
+        
+        all_song_stats = []
+        for o, s in zip(outputs, separated):
+            # Calculate SDR for each of the 4 slots against the Guitar ground truth
+            # Slot 1 should be high, others should be low
+            song_stats = [sdr_objective(o[:, i, :, :].flatten(), s.flatten()) for i in range(4)]
+            all_song_stats.append(torch.tensor(song_stats))
+            
+        # Average across the songs in the batch and return as numpy
+        return torch.stack(all_song_stats).mean(0).cpu().numpy()
 
 
 if __name__ == "__main__":
@@ -128,6 +138,7 @@ if __name__ == "__main__":
     if args.checkpoint is not None and os.path.exists(checkpoint_path):
         print(f"Loading checkpoint: {checkpoint_path}")
         state = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        best_validation_objective = state.get('best_validation_objective', float('-inf'))
         optimizer.load_state_dict(state['optimizer'])
         network.load_state_dict(state['state_dict'])
         initial_epoch = state['epoch'] + 1
@@ -205,7 +216,8 @@ if __name__ == "__main__":
                     'state_dict': raw_network.state_dict(),
                     'optimizer': optimizer.state_dict(),
                     'steps': steps,
-                    'args': args
+                    'args': args,
+                    'best_validation_objective': best_validation_objective
                 }
                 objective = average_stats[1]
 
