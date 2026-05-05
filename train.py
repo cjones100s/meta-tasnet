@@ -138,6 +138,7 @@ if __name__ == "__main__":
     if args.checkpoint is not None and os.path.exists(checkpoint_path):
         print(f"Loading checkpoint: {checkpoint_path}")
         state = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        best_validation_objective = state.get('best_validation_objective', float('-inf'))
         optimizer.load_state_dict(state['optimizer'])
         network.load_state_dict(state['state_dict'])
         initial_epoch = state['epoch'] + 1
@@ -215,7 +216,8 @@ if __name__ == "__main__":
                     'state_dict': raw_network.state_dict(),
                     'optimizer': optimizer.state_dict(),
                     'steps': steps,
-                    'args': args
+                    'args': args,
+                    'best_validation_objective': best_validation_objective
                 }
                 objective = average_stats[1]
 
