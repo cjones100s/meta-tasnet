@@ -29,15 +29,25 @@ def train_step(network, batch, s):
 def eval_step(network, batch, device):
     network.eval()
     mix, separated = batch
+    
+    # mix is a list of tensors, separated is a list of tensors [1, 1, T]
     mix = [m.to(device) for m in mix]
     separated = [s.to(device) for s in separated]
+
     with torch.no_grad():
-        outputs = network.inference(mix, n_chunks=1)
-        # Squeeze the model output to get Slot 1 specifically
-        # outputs[i] is (1, 4, 1, T). We want (1, T) for Slot 1
-        objectives = [sdr_objective(o[:, 1, :, :].flatten(), s.flatten()) for o, s in zip(outputs, separated)]
-        objectives = [o.view(-1) for o in objectives]
-    return torch.cat(objectives, 0).cpu().numpy()
+        # inference returns a list of outputs for each stage
+        # each output is (1, 4, 1, T)
+        outputs = network.inference(mix, n_chunks=1) 
+        
+        all_song_stats = []
+        for o, s in zip(outputs, separated):
+            # Calculate SDR for each of the 4 slots against the Guitar ground truth
+            # Slot 1 should be high, others should be low
+            song_stats = [sdr_objective(o[:, i, :, :].flatten(), s.flatten()) for i in range(4)]
+            all_song_stats.append(torch.tensor(song_stats))
+            
+        # Average across the songs in the batch and return as numpy
+        return torch.stack(all_song_stats).mean(0).cpu().numpy()
 
 
 if __name__ == "__main__":
